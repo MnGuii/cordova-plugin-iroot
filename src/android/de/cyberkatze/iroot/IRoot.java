@@ -21,6 +21,11 @@ import org.json.JSONException;
 public class IRoot extends CordovaPlugin {
 
     private final String ERROR_UNKNOWN_ACTION = "Unknown action";
+    
+    // Variáveis para detecção anti-tampering
+    private long lastCheckTime = 0;
+    private int consecutiveFailedChecks = 0;
+    private static final int MAX_FAILED_CHECKS = 3;
 
     private InternalRootDetection internalRootDetection = new InternalRootDetection();
 
@@ -297,6 +302,29 @@ public class IRoot extends CordovaPlugin {
      private PluginResult checkIsRooted(final JSONArray args, final CallbackContext callbackContext) {
          try {
              Context context = this.cordova.getActivity().getApplicationContext();
+             
+             // PRIMEIRA VERIFICAÇÃO: Detectar Frida/Instrumentação
+             boolean fridaDetected = FridaDetection.isFridaPresent(context);
+             if (fridaDetected) {
+                 LOG.w(Constants.LOG_TAG, "[SECURITY] Frida/Instrumentation detected!");
+                 // Retorna true (rooted) se Frida for detectado
+                 return new PluginResult(Status.OK, true);
+             }
+             
+             // SEGUNDA VERIFICAÇÃO: Detectar chamadas muito rápidas (possível automação)
+             long currentTime = System.currentTimeMillis();
+             if (lastCheckTime != 0 && (currentTime - lastCheckTime) < 1000) {
+                 LOG.w(Constants.LOG_TAG, "[SECURITY] Rapid successive calls detected!");
+                 return new PluginResult(Status.OK, true);
+             }
+             lastCheckTime = currentTime;
+             
+             // TERCEIRA VERIFICAÇÃO: Verificar integridade da stack trace
+             if (isStackTraceCompromised()) {
+                 LOG.w(Constants.LOG_TAG, "[SECURITY] Stack trace compromise detected!");
+                 return new PluginResult(Status.OK, true);
+             }
+             
              RootBeer rootBeer = new RootBeer(context);
 
              boolean checkRootBeer = rootBeer.isRooted();
@@ -306,11 +334,18 @@ public class IRoot extends CordovaPlugin {
              LOG.d(Constants.LOG_TAG, "[checkIsRooted] checkInternal: " + checkInternal);
 
              boolean isRooted = checkRootBeer || checkInternal;
-             // boolean isRooted = checkRootBeer;
+             
+             // QUARTA VERIFICAÇÃO: Verificar se o resultado foi alterado maliciosamente
+             if (verifyResultIntegrity(isRooted, checkRootBeer, checkInternal)) {
+                 LOG.w(Constants.LOG_TAG, "[SECURITY] Result tampering detected!");
+                 return new PluginResult(Status.OK, true);
+             }
 
              return new PluginResult(Status.OK, isRooted);
          } catch (Exception error) {
-             return Utils.getPluginResultError("checkIsRooted", error);
+             // Se houve exceção, pode ser tentativa de bypass
+             LOG.w(Constants.LOG_TAG, "[SECURITY] Exception during security check: " + error.getMessage());
+             return new PluginResult(Status.OK, true); // Falha segura
          }
      }
 
@@ -380,6 +415,87 @@ public class IRoot extends CordovaPlugin {
             return new PluginResult(Status.OK, isRooted);
         } catch (Exception error) {
             return Utils.getPluginResultError("checkIsRootedWithBusyBoxWithEmulator", error);
+        }
+    }
+    
+    /**
+     * Verifica se o stack trace foi comprometido (indicação de Frida)
+     */
+    private boolean isStackTraceCompromised() {
+        try {
+            StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+            
+            for (StackTraceElement element : stackTrace) {
+                String className = element.getClassName();
+                String methodName = element.getMethodName();
+                
+                // Detectar assinaturas do Frida
+                if (className.contains("frida") || 
+                    className.contains("Frida") ||
+                    className.contains("com.android.internal.os.ZygoteInit") ||
+                    methodName.contains("invoke0") ||
+                    methodName.contains("invoke") && className.contains("java.lang.reflect")) {
+                    return true;
+                }
+                
+                // Detectar stack trace muito curto (possível manipulação)
+                if (stackTrace.length < 3) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (Exception e) {
+            return true; // Se não conseguir verificar, assumir comprometido
+        }
+    }
+    
+    /**
+     * Verifica a integridade do resultado
+     */
+    private boolean verifyResultIntegrity(boolean finalResult, boolean rootBeerResult, boolean internalResult) {
+        try {
+            // Recalcular o resultado
+            boolean expectedResult = rootBeerResult || internalResult;
+            
+            // Se o resultado final não bate com o esperado, pode ter sido alterado
+            if (finalResult != expectedResult) {
+                return true;
+            }
+            
+            // Verificar se os valores individuais são coerentes
+            if (!rootBeerResult && !internalResult && finalResult) {
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            return true;
+        }
+    }
+    
+    /**
+     * Método adicional para detectar modificações no método
+     */
+    private boolean isMethodHooked() {
+        try {
+            // Verificar se este método está sendo executado de forma anormal
+            long startTime = System.nanoTime();
+            
+            // Operação simples que deveria ser rápida
+            int dummy = 1 + 1;
+            
+            long endTime = System.nanoTime();
+            long duration = endTime - startTime;
+            
+            // Se demorou mais que o esperado, pode estar sendo interceptado
+            if (duration > 1000000) { // 1ms em nanossegundos
+                return true;
+            }
+            
+            return false;
+        } catch (Exception e) {
+            return true;
         }
     }
 
