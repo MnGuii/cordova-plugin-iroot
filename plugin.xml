@@ -47,6 +47,7 @@
 
         <source-file src="src/android/de/cyberkatze/iroot/Constants.java" target-dir="src/de/cyberkatze/iroot"/>
         <source-file src="src/android/de/cyberkatze/iroot/CordovaActions.java" target-dir="src/de/cyberkatze/iroot"/>
+        <source-file src="src/android/de/cyberkatze/iroot/FridaDetection.java" target-dir="src/de/cyberkatze/iroot"/>
         <source-file src="src/android/de/cyberkatze/iroot/InternalRootDetection.java" target-dir="src/de/cyberkatze/iroot"/>
         <source-file src="src/android/de/cyberkatze/iroot/IRoot.java" target-dir="src/de/cyberkatze/iroot"/>
         <source-file src="src/android/de/cyberkatze/iroot/Utils.java" target-dir="src/de/cyberkatze/iroot"/>
