@@ -14,7 +14,9 @@
 #include <sys/socket.h>
 #include <mach-o/dyld.h>
 #include <sys/types.h>
+#if !TARGET_OS_IPHONE
 #include <sys/ptrace.h>
+#endif
 
 
 
